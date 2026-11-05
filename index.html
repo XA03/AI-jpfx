@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日幣課金匯率</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1d2330;--sub:#6b7385;--line:#e3e6ec;--good:#0a8f4d;--bad:#d03a3a;--in:#fff8dc}
+@media(prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b202b;--text:#e8ebf2;--sub:#98a1b5;--line:#2b3242;--good:#3ecf85;--bad:#ff7070;--in:#2c2a18}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,"Noto Sans TC",sans-serif}
+main{max-width:820px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+h2{font-size:16px;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+h3{font-size:14px;margin:18px 0 8px;color:var(--sub)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 12px}
+.k{color:var(--sub);font-size:13px}.v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.good{color:var(--good)}.bad{color:var(--bad)}
+.bar{position:relative;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--bad),var(--good));margin:14px 0 4px}
+.bar i{position:absolute;top:-4px;width:4px;height:18px;border-radius:2px;background:var(--text);transform:translateX(-2px)}
+.lr{display:flex;justify-content:space-between;color:var(--sub);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:5px 3px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--sub);font-weight:500}
+.wrap{overflow-x:auto}
+tr.off td.o{opacity:.45}
+button,input{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+button{cursor:pointer}
+input{width:100%;margin:4px 0 10px}
+td input{margin:0;padding:4px 6px;background:var(--in);min-width:64px}
+td input.nm{min-width:110px;text-align:left}
+td input.qt{min-width:44px;width:52px}
+td input[type=checkbox]{width:18px;min-width:0;height:18px}
+.sub{color:var(--sub);font-size:13px}
+.hide{display:none}
+.row{display:flex;gap:8px}.row input{margin:0}
+.x{padding:2px 8px}
+</style>
+</head>
+<body>
+<main>
+  <h1>日幣課金匯率 <span><button id="reload">更新匯率</button> <button id="cfg">設定</button></span></h1>
+  <div id="setup" class="card hide">
+    <h2>連線設定（只用來取得匯率）</h2>
+    <label class="k">Apps Script 網頁應用程式網址（/exec）</label>
+    <input id="url" placeholder="https://script.google.com/macros/s/.../exec">
+    <label class="k">密碼（TOKEN）</label>
+    <input id="token" type="password">
+    <button id="save">儲存並載入</button> <button id="demo">用示範匯率</button>
+  </div>
+  <div id="msg" class="sub"></div>
+  <div id="rate"></div>
+
+  <h3>我的計算（只存在這個瀏覽器，不會寫回試算表）</h3>
+  <div class="card"><div class="row"><input id="newname" placeholder="新遊戲名稱"><button id="add">新增遊戲</button></div></div>
+  <div id="local"></div>
+
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=(n,d=2)=>typeof n==='number'&&isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+// 差額：負數 = 日區省錢（綠），正數 = 日區較貴（紅）
+const pct=n=>typeof n==='number'&&isFinite(n)?`<span class="${n<0?'good':n>0?'bad':''}">${n>0?'+':''}${(n*100).toFixed(2)}%</span>`:'—';
+const money=n=>typeof n==='number'&&isFinite(n)?`<span class="${n<0?'good':n>0?'bad':''}">${n>0?'+':''}${fmt(n)}</span>`:'—';
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function get(k){try{return localStorage.getItem(k)||''}catch(e){return ''}}
+function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+
+let R=null, local=[];
+try{R=JSON.parse(get('rate'))||null}catch(e){}
+try{local=JSON.parse(get('local'))||[]}catch(e){}
+const saveLocal=()=>put('local',JSON.stringify(local));
+
+// ---------- 計算（與試算表邏輯相同） ----------
+function calc(twd,jpy){
+  twd=+twd;jpy=+jpy;
+  if(!R||!(twd>0&&jpy>0))return null;
+  const r=jpy/twd,t=jpy/R.current;
+  return{rate:r,vsLow:(r-R.low)/R.low,vsHigh:(r-R.high)/R.high,vsNow:(r-R.current)/R.current,jpyAsTwd:t,diff:t-twd};
+}
+function cartOf(g){
+  let tw=0,jp=0;
+  g.items.forEach(i=>{if(i.buy){const q=+i.qty||0;tw+=q*(+i.twd||0);jp+=q*(+i.jpy||0)}});
+  return{twd:tw,jpy:jp,c:calc(tw,jp)};
+}
+function cartHtml(t){
+  const c=t.c;
+  if(!c)return'<div class="sub">購物車沒有勾選項目，或還沒填價格（需先有匯率）</div>';
+  return`<div class="grid">
+    <div><div class="k">台區價合計</div><div class="v">${fmt(t.twd,0)} TWD</div></div>
+    <div><div class="k">日區價合計</div><div class="v">${fmt(t.jpy,0)} JPY</div></div>
+    <div><div class="k">整車隱含匯率</div><div class="v">${fmt(c.rate,4)}</div></div>
+    <div><div class="k">相對目前</div><div class="v">${pct(c.vsNow)}</div></div>
+    <div><div class="k">相對最虧</div><div class="v">${pct(c.vsLow)}</div></div>
+    <div><div class="k">相對最賺</div><div class="v">${pct(c.vsHigh)}</div></div>
+    <div><div class="k">日區折合台幣</div><div class="v">${fmt(c.jpyAsTwd)}</div></div>
+    <div><div class="k">日區貴(+)/省(-) TWD</div><div class="v">${money(c.diff)}</div></div></div>`;
+}
+
+// ---------- 匯率卡 ----------
+function renderRate(){
+  if(!R){$('rate').innerHTML='';return}
+  const span=R.high-R.low,p=span>0?Math.max(0,Math.min(1,(R.current-R.low)/span)):0.5;
+  $('rate').innerHTML=`<div class="card"><h2>1 台幣 = ? 日幣</h2>
+    <div class="grid">
+      <div><div class="k">目前</div><div class="v">${fmt(R.current,4)}</div></div>
+      <div><div class="k">一年平均</div><div class="v">${fmt(R.avg,4)}</div></div>
+      <div><div class="k">最賺（日區最划算）${esc(R.highDate)}</div><div class="v">${fmt(R.high,4)}</div></div>
+      <div><div class="k">最虧（日區最不划算）${esc(R.lowDate)}</div><div class="v">${fmt(R.low,4)}</div></div>
+    </div>
+    <div class="bar"><i style="left:${p*100}%"></i></div>
+    <div class="lr"><span>最虧</span><span>目前位置 ${(p*100).toFixed(0)}%</span><span>最賺</span></div>
+    <div class="sub">匯率更新 ${esc(R.updated)}　綠 = 日區省錢，紅 = 日區較貴</div></div>`;
+}
+
+// ---------- 我的計算（可編輯） ----------
+function rowHtml(i,idx){
+  return`<tr data-i="${idx}">
+    <td><input type="checkbox" data-f="buy" ${i.buy?'checked':''}></td>
+    <td class="o"><input class="nm" data-f="name" value="${esc(i.name)}" placeholder="項目"></td>
+    <td class="o"><input class="qt" data-f="qty" type="number" inputmode="decimal" step="any" value="${esc(i.qty)}"></td>
+    <td class="o"><input data-f="twd" type="number" inputmode="decimal" step="any" value="${esc(i.twd)}" placeholder="台"></td>
+    <td class="o"><input data-f="jpy" type="number" inputmode="decimal" step="any" value="${esc(i.jpy)}" placeholder="日"></td>
+    <td class="o r1"></td><td class="o r2"></td><td class="o r3"></td><td class="o r4"></td>
+    <td><button class="x" data-act="delrow" title="刪除此列">×</button></td></tr>`;
+}
+function renderLocal(){
+  $('local').innerHTML=local.map(g=>`<div class="card" data-g="${g.id}">
+    <h2><span>${esc(g.name)}</span><button data-act="delgame">刪除遊戲</button></h2>
+    <div class="k" style="margin-bottom:6px">購物車（只計入有勾選的項目 × 數量）</div>
+    <div class="cart"></div>
+    <div class="k" style="margin:12px 0 4px">項目（價格請填單價）</div>
+    <div class="wrap"><table><tr><th>買</th><th>項目</th><th>數量</th><th>台區價</th><th>日區價</th><th>匯率</th><th>目前</th><th>最虧</th><th>最賺</th><th></th></tr>
+    ${g.items.map(rowHtml).join('')}</table></div>
+    <div style="margin-top:8px"><button data-act="addrow">＋ 新增項目</button></div></div>`).join('')
+    ||'<div class="sub">還沒有遊戲，先在上面新增一個。</div>';
+  recalc();
+}
+// 只更新計算結果，不重建輸入欄（避免輸入中失去焦點）
+function recalc(){
+  document.querySelectorAll('#local .card[data-g]').forEach(card=>{
+    const g=local.find(x=>String(x.id)===card.dataset.g);if(!g)return;
+    card.querySelector('.cart').innerHTML=cartHtml(cartOf(g));
+    card.querySelectorAll('tr[data-i]').forEach(tr=>{
+      const i=g.items[+tr.dataset.i],c=calc(i.twd,i.jpy);
+      tr.querySelectorAll('td.o').forEach(td=>td.style.opacity=i.buy?'':'.45');
+      tr.querySelector('.r1').textContent=c?fmt(c.rate,4):'—';
+      tr.querySelector('.r2').innerHTML=c?pct(c.vsNow):'—';
+      tr.querySelector('.r3').innerHTML=c?pct(c.vsLow):'—';
+      tr.querySelector('.r4').innerHTML=c?pct(c.vsHigh):'—';
+    });
+  });
+}
+const newItem=()=>({buy:false,name:'',qty:1,twd:'',jpy:''});
+function addGame(){
+  const name=$('newname').value.trim();if(!name)return;
+  local.push({id:Date.now(),name,items:[newItem(),newItem(),newItem()]});
+  $('newname').value='';saveLocal();renderLocal();
+}
+$('add').onclick=addGame;
+$('newname').onkeydown=e=>{if(e.key==='Enter')addGame()};
+$('local').addEventListener('input',e=>{
+  const f=e.target.dataset.f;if(!f)return;
+  const card=e.target.closest('.card'),g=local.find(x=>String(x.id)===card.dataset.g);
+  const i=g.items[+e.target.closest('tr').dataset.i];
+  i[f]=f==='buy'?e.target.checked:e.target.value;
+  saveLocal();recalc();
+});
+let pending=null; // 刪除遊戲需按兩次確認（不用 confirm）
+$('local').addEventListener('click',e=>{
+  const act=e.target.dataset.act;if(!act)return;
+  const card=e.target.closest('.card'),g=local.find(x=>String(x.id)===card.dataset.g);
+  if(act==='addrow'){g.items.push(newItem());saveLocal();renderLocal();}
+  else if(act==='delrow'){g.items.splice(+e.target.closest('tr').dataset.i,1);saveLocal();renderLocal();}
+  else if(act==='delgame'){
+    if(pending!==g.id){pending=g.id;e.target.textContent='再按一次確認刪除';return}
+    local=local.filter(x=>x!==g);pending=null;saveLocal();renderLocal();
+  }
+});
+
+// ---------- 載入匯率 ----------
+const DEMO={rate:{current:4.82,high:5.1,highDate:'2026/03/02',low:4.55,lowDate:'2026/09/20',avg:4.85,pos:0.49,updated:'示範'}};
+function apply(d){
+  R=d.rate;put('rate',JSON.stringify(R));
+  renderRate();recalc();
+}
+async function load(){
+  const url=get('url'),tk=get('token');
+  if(!url){
+    $('msg').textContent=R?'尚未設定連線，使用上次儲存的匯率。':'請先設定連線取得匯率，或用示範匯率。';
+    if(!R)$('setup').classList.remove('hide');
+    return;
+  }
+  $('msg').textContent='載入中…';
+  try{
+    const res=await fetch(url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(tk));
+    const d=await res.json();
+    if(d.error){$('msg').textContent='錯誤：'+d.error;return}
+    $('msg').textContent='';apply(d);
+  }catch(e){$('msg').textContent='連線失敗：'+e.message+(R?'（使用上次儲存的匯率）':'')}
+}
+$('cfg').onclick=()=>{$('url').value=get('url');$('setup').classList.toggle('hide')};
+$('save').onclick=()=>{put('url',$('url').value.trim());put('token',$('token').value);$('setup').classList.add('hide');load()};
+$('demo').onclick=()=>{$('setup').classList.add('hide');$('msg').textContent='使用示範匯率（非真實資料）';apply(DEMO)};
+$('reload').onclick=load;
+
+renderRate();renderLocal();load();
+</script>
+</body>
+</html>
