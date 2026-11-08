@@ -70,6 +70,10 @@ td input[type=checkbox]{width:18px;min-width:0;height:18px}
   tr[data-i] td input[type=checkbox]{width:22px;height:22px;padding:0}
   tr[data-i] .x{padding:4px 12px;font-size:18px}
 }
+.pgcur{background:var(--text);color:var(--bg)}
+.brow{display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.brow input{width:18px;height:18px;margin:0;padding:0;flex:none}
+.brow span:nth-child(3){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gbtn{color:var(--good);border-color:var(--good)}
 .rbtn{color:var(--bad);border-color:var(--bad)}
 .rbtn:disabled{opacity:.4;cursor:default}
@@ -97,6 +101,13 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <button id="dno">取消</button><button id="dyes"></button>
     </div>
   </dialog>
+  <dialog id="dlg2">
+    <h2>批量刪除項目</h2>
+    <div class="row" style="margin-bottom:8px;flex-wrap:wrap"><button id="bAll">全選本頁</button><button id="bNone">取消本頁</button><button id="bEmpty">選所有空白項目</button></div>
+    <div id="blist"></div>
+    <div id="bpager" class="row" style="justify-content:center;flex-wrap:wrap;margin-top:8px"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button id="bno">取消</button><button id="byes" class="rbtn">刪除所選 (0)</button></div>
+  </dialog>
   <div id="msg" class="sub"></div>
   <div class="layout">
     <aside>
@@ -106,6 +117,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <div class="row"><select id="sel" aria-label="選擇遊戲"></select><button id="up" title="上移" aria-label="上移">▲</button><button id="down" title="下移" aria-label="下移">▼</button></div>
         <div id="pos" class="sub" style="margin-top:6px;word-break:break-all;color:var(--text)"></div>
         <div class="row" style="margin-top:8px"><button id="add" class="gbtn" style="flex:1">新增遊戲分類</button></div>
+        <div class="row" style="margin-top:8px"><button id="dup" style="flex:1">複製此遊戲</button></div>
         <div class="row" style="margin-top:8px"><button id="rename" style="flex:1">重新命名</button><button id="delgame" class="rbtn" style="flex:1">刪除此遊戲</button></div>
         <div class="row" style="margin-top:8px"><button id="exp" style="flex:1">匯出 JSON</button><button id="imp" style="flex:1">匯入 JSON</button></div>
         <input id="file" type="file" accept=".json,application/json" class="hide">
@@ -178,18 +190,34 @@ function rowHtml(i,idx,arr){
   return`<tr data-i="${idx}">
     <td class="c-buy"><input type="checkbox" data-f="buy" aria-label="買" ${i.buy?'checked':''}></td>
     <td class="o c-name" data-l="項目"><textarea class="nm" data-f="name" rows="1" placeholder="項目">${esc(i.name)}</textarea></td>
-    <td class="o" data-l="數量"><input class="qt" data-f="qty" type="number" inputmode="decimal" step="any" value="${esc(i.qty)}"></td>
-    <td class="o" data-l="台區價 (TWD)"><input data-f="twd" type="number" inputmode="decimal" step="any" value="${esc(i.twd)}" placeholder="台"></td>
-    <td class="o" data-l="日區價 (JPY)"><input data-f="jpy" type="number" inputmode="decimal" step="any" value="${esc(i.jpy)}" placeholder="日"></td>
+    <td class="o" data-l="數量"><input class="qt" data-f="qty" type="text" inputmode="decimal" autocomplete="off" value="${esc(i.qty)}"></td>
+    <td class="o" data-l="台區價 (TWD)"><input data-f="twd" type="text" inputmode="decimal" autocomplete="off" value="${esc(i.twd)}" placeholder="台"></td>
+    <td class="o" data-l="日區價 (JPY)"><input data-f="jpy" type="text" inputmode="decimal" autocomplete="off" value="${esc(i.jpy)}" placeholder="日"></td>
     <td class="o r1 c-res" data-l="隱含匯率"></td><td class="o r2 c-res" data-l="相對目前"></td><td class="o r3 c-res" data-l="相對最虧"></td><td class="o r4 c-res" data-l="相對最賺"></td>
     <td class="c-del"><button class="x" data-act="rowup" title="上移" aria-label="上移" ${idx<=0?'disabled':''}>▲</button><button class="x" data-act="rowdown" title="下移" aria-label="下移" ${idx>=n-1?'disabled':''}>▼</button><button class="x" data-act="delrow" title="刪除此列" aria-label="刪除此列">×</button></td></tr>`;
 }
 let cur=get('cur');
+// 項目每 10 個一頁（購物車合計仍計算全部項目）
+const PAGE=10,pages={};
+function pageInfo(g){
+  const total=Math.max(1,Math.ceil(g.items.length/PAGE));
+  const pg=Math.min(Math.max(pages[g.id]||0,0),total-1);
+  pages[g.id]=pg;return{pg,total,start:pg*PAGE};
+}
+function rowsHtml(g){const{start}=pageInfo(g);return g.items.slice(start,start+PAGE).map((i,k)=>rowHtml(i,start+k,g.items)).join('')}
+function pagerHtml(g){
+  const{pg,total}=pageInfo(g);if(total<=1)return'';
+  let nums='';
+  for(let p=0;p<total;p++)nums+=`<button data-act="pg" data-p="${p}" class="${p===pg?'pgcur':''}" ${p===pg?'aria-current="page"':''}>${p+1}</button>`;
+  return`<div class="row" style="margin-top:8px;justify-content:center;flex-wrap:wrap">
+    <button data-act="pgprev" aria-label="上一頁" ${pg<=0?'disabled':''}>‹</button>${nums}
+    <button data-act="pgnext" aria-label="下一頁" ${pg>=total-1?'disabled':''}>›</button></div>`;
+}
 function renderLocal(){
   if(!local.some(g=>String(g.id)===String(cur)))cur=local.length?String(local[0].id):'';
   put('cur',cur);
   $('sel').innerHTML=local.map((g,n)=>`<option value="${g.id}" ${String(g.id)===String(cur)?'selected':''}>${n+1}. ${esc(g.name)}</option>`).join('')||'<option>（尚無遊戲）</option>';
-  $('sel').disabled=!local.length;$('delgame').disabled=!local.length;$('rename').disabled=!local.length;
+  $('sel').disabled=!local.length;$('delgame').disabled=!local.length;$('rename').disabled=!local.length;$('dup').disabled=!local.length;
   const pos=local.findIndex(g=>String(g.id)===String(cur));
   $('pos').textContent=pos>=0?local[pos].name+'（第 '+(pos+1)+' / '+local.length+' 個）':'';
   $('up').disabled=pos<=0;$('down').disabled=pos<0||pos>=local.length-1;
@@ -199,8 +227,8 @@ function renderLocal(){
     <div class="cart"></div>
     <div class="k" style="margin:12px 0 4px">項目（價格請填單價）</div>
     <div class="wrap"><table><tr class="hd"><th>買</th><th>項目</th><th>數量</th><th>台區價</th><th>日區價</th><th>匯率</th><th>目前</th><th>最虧</th><th>最賺</th><th></th></tr>
-    ${g.items.map(rowHtml).join('')}</table></div>
-    <div style="margin-top:8px"><button data-act="addrow">＋ 新增項目</button></div></div>`).join('')
+    ${rowsHtml(g)}</table></div>${pagerHtml(g)}
+    <div class="row" style="margin-top:8px"><button data-act="addrow">＋ 新增項目</button><button data-act="bulk" class="rbtn">批量刪除</button></div></div>`).join('')
     ||'<div class="sub">還沒有遊戲，先在上面新增一個。</div>';
   recalc();autosize();
 }
@@ -235,8 +263,59 @@ function ask(title,{input=false,placeholder='',ok='確定',text=''}={}){
     $('dno').onclick=()=>done(null);
     d.oncancel=()=>res(null); // 按 Esc
     $('dinput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('dyes').click()}};
-    d.showModal();if(input)$('dinput').focus();
+    // 方向鍵在「取消／確定」之間切換；沒有輸入欄時預設停在取消，避免誤刪
+    d.onkeydown=e=>{
+      if(!/^Arrow(Left|Right|Up|Down)$/.test(e.key)||e.target.tagName!=='BUTTON')return;
+      e.preventDefault();(e.target===$('dyes')?$('dno'):$('dyes')).focus();
+    };
+    d.showModal();
+    if(input)$('dinput').focus();else $('dno').focus();
   });
+}
+// 批量刪除：彈窗列出該遊戲所有項目（跨頁），勾選後一次刪除
+function openBulk(g){
+  const d=$('dlg2'),list=$('blist'),pager=$('bpager');
+  const sel=new Set();let pg=0; // 勾選記錄跨頁保留
+  const total=()=>Math.max(1,Math.ceil(g.items.length/PAGE));
+  const boxes=()=>[...list.querySelectorAll('input[type=checkbox]')];
+  const upd=()=>{$('byes').textContent='刪除所選 ('+sel.size+')';$('byes').disabled=!sel.size};
+  const draw=()=>{
+    pg=Math.min(pg,total()-1);const s=pg*PAGE;
+    list.innerHTML=g.items.slice(s,s+PAGE).map((it,k)=>{const i=s+k;
+      return`<label class="brow"><input type="checkbox" data-i="${i}" ${sel.has(i)?'checked':''}><span>${i+1}.</span><span>${esc(String(it.name).trim()||'（未命名）')}</span><span class="sub">${fmt(+it.twd||0,0)} / ${fmt(+it.jpy||0,0)}</span></label>`}).join('')
+      ||'<div class="sub">沒有項目</div>';
+    let nums='';
+    if(total()>1)for(let p=0;p<total();p++)nums+=`<button data-p="${p}" class="${p===pg?'pgcur':''}">${p+1}</button>`;
+    pager.innerHTML=nums;upd();
+  };
+  list.onchange=e=>{const i=+e.target.dataset.i;if(e.target.checked)sel.add(i);else sel.delete(i);upd()};
+  list.onkeydown=e=>{ // ↑ ↓ 在勾選框間移動
+    if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;
+    const bs=boxes(),i=bs.indexOf(e.target);if(i<0)return;
+    e.preventDefault();const t=bs[i+(e.key==='ArrowDown'?1:-1)];if(t)t.focus();
+  };
+  pager.onclick=e=>{
+    const p=e.target.dataset.p;if(p===undefined)return;
+    pg=+p;draw();const c=pager.querySelector('.pgcur');if(c)c.focus();
+  };
+  pager.onkeydown=e=>{ // ← → 在頁碼間移動
+    if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;
+    const bs=[...pager.querySelectorAll('button')],n=bs.indexOf(e.target)+(e.key==='ArrowRight'?1:-1);
+    e.preventDefault();if(bs[n])bs[n].focus();
+  };
+  const pageIdx=()=>boxes().map(b=>+b.dataset.i); // 目前這一頁的項目編號
+  $('bAll').onclick=()=>{pageIdx().forEach(i=>sel.add(i));draw()};
+  $('bNone').onclick=()=>{pageIdx().forEach(i=>sel.delete(i));draw()};
+  $('bEmpty').onclick=()=>{g.items.forEach((it,i)=>{if(!String(it.name).trim()&&!it.twd&&!it.jpy)sel.add(i)});draw()};
+  $('bno').onclick=()=>d.close();
+  $('byes').onclick=async()=>{
+    if(!sel.size)return;
+    const yes=await ask('刪除項目',{text:'確定刪除選取的 '+sel.size+' 個項目？此動作無法復原。',ok:'刪除'});
+    if(!yes)return;
+    g.items=g.items.filter((_,i)=>!sel.has(i));saveLocal();renderLocal();d.close();
+  };
+  draw();d.showModal();
+  const f=boxes()[0];if(f)f.focus();else $('bno').focus();
 }
 async function addGame(){
   const name=await ask('新增遊戲分類',{input:true,placeholder:'遊戲名稱',ok:'新增'});
@@ -276,11 +355,64 @@ $('local').addEventListener('input',e=>{
   const f=e.target.dataset.f;if(!f)return;
   const card=e.target.closest('.card'),g=local.find(x=>String(x.id)===card.dataset.g);
   const i=g.items[+e.target.closest('tr').dataset.i];
+  if(f==='qty'||f==='twd'||f==='jpy'){ // 只留數字與一個小數點
+    let c=e.target.value.replace(/[^\d.]/g,'');
+    const p=c.indexOf('.');if(p>=0)c=c.slice(0,p+1)+c.slice(p+1).replace(/\./g,'');
+    if(c!==e.target.value)e.target.value=c;
+  }
   i[f]=f==='buy'?e.target.checked:e.target.value;
   saveLocal();recalc();
   if(e.target.tagName==='TEXTAREA')autosize();
 });
-$('local').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.tagName==='TEXTAREA')e.preventDefault()});
+// 方向鍵在格子間移動；Enter 往下一列。文字欄的方向鍵只在游標到頭尾時才跳格
+// 每列可移動的欄位（含 ▲ ▼ × 按鈕），最下面還有「新增項目」按鈕
+const COLS=['[data-f="buy"]','[data-f="name"]','[data-f="qty"]','[data-f="twd"]','[data-f="jpy"]',
+  '[data-act="rowup"]','[data-act="rowdown"]','[data-act="delrow"]'];
+const cellAt=(row,c)=>{const t=row&&row.querySelector(COLS[c]);return t&&!t.disabled?t:null};
+const focusEl=t=>{t.focus();if(t.tagName==='TEXTAREA'||t.type==='text'){const n=t.value.length;t.setSelectionRange(n,n)}}; // 游標放最後，不全選
+$('local').addEventListener('keydown',e=>{
+  const el=e.target,k=e.key;
+  const isAdd=el.dataset&&el.dataset.act==='addrow';
+  const c=isAdd?-1:COLS.findIndex(s=>el.matches(s));
+  if(['pg','pgprev','pgnext'].includes(el.dataset&&el.dataset.act)){ // 頁碼列：← → 在頁碼間移動
+    if(k==='ArrowLeft'||k==='ArrowRight'){
+      e.preventDefault();
+      const bs=[...el.parentElement.querySelectorAll('button:not(:disabled)')],n=bs.indexOf(el)+(k==='ArrowRight'?1:-1);
+      if(bs[n])bs[n].focus();
+    }
+    return;
+  }
+  if(!isAdd&&c<0)return;
+  const card=el.closest('.card'),rows=[...card.querySelectorAll('tr[data-i]')];
+  const tr=el.closest('tr'),idx=rows.indexOf(tr),addBtn=card.querySelector('[data-act="addrow"]');
+  const down=toAdd=>{ // 往下找同一欄；沒有就到「新增項目」
+    for(let j=idx+1;j<rows.length;j++){const t=cellAt(rows[j],c);if(t){focusEl(t);return}}
+    if(toAdd&&addBtn)addBtn.focus();
+  };
+  if(k==='Enter'){
+    if(el.tagName==='BUTTON')return; // 按鈕上的 Enter 照常觸發
+    e.preventDefault();down(false);return;
+  }
+  if(!/^Arrow(Up|Down|Left|Right)$/.test(k))return;
+  if(el.tagName==='TEXTAREA'||el.type==='text'){ // 文字欄：游標到頭尾才跳格
+    if(el.selectionStart!==el.selectionEnd)return;
+    const s=el.selectionStart,end=el.value.length;
+    if((k==='ArrowLeft'||k==='ArrowUp')&&s>0)return;
+    if((k==='ArrowRight'||k==='ArrowDown')&&s<end)return;
+  }
+  e.preventDefault();
+  if(isAdd){
+    if(k==='ArrowUp'&&rows.length){const t=cellAt(rows[rows.length-1],1);if(t)focusEl(t)}
+    return;
+  }
+  if(k==='ArrowDown')down(true);
+  else if(k==='ArrowUp'){
+    for(let j=idx-1;j>=0;j--){const t=cellAt(rows[j],c);if(t){focusEl(t);return}}
+  }else{
+    const step=k==='ArrowRight'?1:-1;
+    for(let n=c+step;n>=0&&n<COLS.length;n+=step){const t=cellAt(tr,n);if(t){focusEl(t);return}}
+  }
+});
 $('sel').onchange=()=>{cur=$('sel').value;renderLocal()};
 function move(d){
   const i=local.findIndex(x=>String(x.id)===String(cur)),j=i+d;
@@ -290,6 +422,17 @@ function move(d){
 }
 $('up').onclick=()=>move(-1);
 $('down').onclick=()=>move(1);
+// 複製遊戲：連同所有項目與價格一起複製（「買」勾選會清掉），方便定價相似的遊戲
+$('dup').onclick=async()=>{
+  const g=local.find(x=>String(x.id)===String(cur));if(!g)return;
+  const name=await ask('複製遊戲分類',{input:true,placeholder:g.name+' 副本',
+    text:'會複製「'+g.name+'」的 '+g.items.length+' 個項目（名稱、數量、台區價、日區價）。',ok:'複製'});
+  if(!name)return;
+  const id=Date.now();
+  const copy={id,name,items:g.items.map(i=>({...i,buy:false}))};
+  local.splice(local.indexOf(g)+1,0,copy); // 放在原遊戲的下一個
+  cur=String(id);saveLocal();renderLocal();
+};
 $('rename').onclick=async()=>{
   const g=local.find(x=>String(x.id)===String(cur));if(!g)return;
   const name=await ask('重新命名遊戲分類',{input:true,placeholder:g.name,text:'目前名稱：'+g.name,ok:'改名'});
@@ -302,15 +445,37 @@ $('delgame').onclick=async()=>{
   if(!yes)return;
   local=local.filter(x=>x!==g);saveLocal();renderLocal();
 };
-$('local').addEventListener('click',e=>{
+$('local').addEventListener('click',async e=>{
   const act=e.target.dataset.act;if(!act)return;
   const card=e.target.closest('.card'),g=local.find(x=>String(x.id)===card.dataset.g);
-  if(act==='addrow'){g.items.push(newItem());saveLocal();renderLocal();}
-  else if(act==='delrow'){g.items.splice(+e.target.closest('tr').dataset.i,1);saveLocal();renderLocal();}
+  if(act==='addrow'){
+    g.items.push(newItem());pages[g.id]=Math.floor((g.items.length-1)/PAGE);saveLocal();renderLocal();
+    const t=document.querySelector('#local [data-act="addrow"]'); // 焦點留在「新增項目」，可連續新增
+    if(t)t.focus();
+  }
+  else if(act==='delrow'){
+    const a=+e.target.closest('tr').dataset.i,it=g.items[a];
+    const yes=await ask('刪除項目',{text:'確定刪除「'+(it.name.trim()||'這個項目')+'」？此動作無法復原。',ok:'刪除'});
+    if(!yes){e.target.focus();return}
+    const k=a-pageInfo(g).start;
+    g.items.splice(a,1);saveLocal();renderLocal();
+    const rs=document.querySelectorAll('#local tr[data-i]');
+    const t=rs.length?(rs[Math.min(k,rs.length-1)].querySelector('[data-act="delrow"]')):document.querySelector('#local [data-act="addrow"]');
+    if(t)t.focus();
+  }
+  else if(act==='bulk')openBulk(g);
+  else if(act==='pg'||act==='pgprev'||act==='pgnext'){
+    pages[g.id]=act==='pg'?+e.target.dataset.p:pageInfo(g).pg+(act==='pgprev'?-1:1);
+    renderLocal();
+    const t=document.querySelector('#local .pgcur');if(t)t.focus(); // 保留鍵盤焦點在目前頁碼
+  }
   else if(act==='rowup'||act==='rowdown'){
     const a=+e.target.closest('tr').dataset.i,b=a+(act==='rowup'?-1:1);
     if(b<0||b>=g.items.length)return;
-    [g.items[a],g.items[b]]=[g.items[b],g.items[a]];saveLocal();renderLocal();
+    [g.items[a],g.items[b]]=[g.items[b],g.items[a]];pages[g.id]=Math.floor(b/PAGE);saveLocal();renderLocal();
+    const row=document.querySelector('#local tr[data-i="'+b+'"]');
+    const t=row&&[act,act==='rowup'?'rowdown':'rowup'].map(x=>row.querySelector('[data-act="'+x+'"]')).find(x=>x&&!x.disabled);
+    if(t)t.focus();
   }
 });
 
