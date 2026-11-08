@@ -21,7 +21,7 @@ main{max-width:1180px;margin:0 auto;padding:16px}
 .layout>*{min-width:0}
 @media(min-width:900px){.layout{grid-template-columns:340px 1fr}aside{position:sticky;top:12px}}
 h1{font-size:20px;margin:4px 0 12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-h2{font-size:16px;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+h2{font-size:16px;margin:0 0 8px;word-break:break-all;display:flex;justify-content:space-between;align-items:center;gap:8px}
 h3{font-size:14px;margin:18px 0 8px;color:var(--sub)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 12px}
@@ -40,7 +40,8 @@ button,input,select{font:inherit;color:var(--text);background:var(--card);border
 button{cursor:pointer}
 input{width:100%;margin:4px 0 10px}
 td input{margin:0;padding:4px 6px;background:var(--in);min-width:64px}
-td input.nm{min-width:110px;text-align:left}
+td textarea.nm{font:inherit;color:var(--text);background:var(--in);border:1px solid var(--line);border-radius:8px;margin:0;padding:4px 6px;min-width:110px;width:100%;box-sizing:border-box;text-align:left;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-all;display:block}
+td:has(textarea.nm){white-space:normal}
 td input.qt{min-width:44px;width:52px}
 td input[type=checkbox]{width:18px;min-width:0;height:18px}
 .sub{color:var(--sub);font-size:13px}
@@ -103,9 +104,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <h3>遊戲分類</h3>
       <div class="card">
         <div class="row"><select id="sel" aria-label="選擇遊戲"></select><button id="up" title="上移" aria-label="上移">▲</button><button id="down" title="下移" aria-label="下移">▼</button></div>
-        <div id="pos" class="sub" style="margin-top:6px"></div>
+        <div id="pos" class="sub" style="margin-top:6px;word-break:break-all;color:var(--text)"></div>
         <div class="row" style="margin-top:8px"><button id="add" class="gbtn" style="flex:1">新增遊戲分類</button></div>
-        <div class="row" style="margin-top:8px"><button id="delgame" class="rbtn" style="flex:1">刪除此遊戲</button></div>
+        <div class="row" style="margin-top:8px"><button id="rename" style="flex:1">重新命名</button><button id="delgame" class="rbtn" style="flex:1">刪除此遊戲</button></div>
         <div class="row" style="margin-top:8px"><button id="exp" style="flex:1">匯出 JSON</button><button id="imp" style="flex:1">匯入 JSON</button></div>
         <input id="file" type="file" accept=".json,application/json" class="hide">
       </div>
@@ -176,7 +177,7 @@ function rowHtml(i,idx,arr){
   const n=arr.length;
   return`<tr data-i="${idx}">
     <td class="c-buy"><input type="checkbox" data-f="buy" aria-label="買" ${i.buy?'checked':''}></td>
-    <td class="o c-name" data-l="項目"><input class="nm" data-f="name" value="${esc(i.name)}" placeholder="項目"></td>
+    <td class="o c-name" data-l="項目"><textarea class="nm" data-f="name" rows="1" placeholder="項目">${esc(i.name)}</textarea></td>
     <td class="o" data-l="數量"><input class="qt" data-f="qty" type="number" inputmode="decimal" step="any" value="${esc(i.qty)}"></td>
     <td class="o" data-l="台區價 (TWD)"><input data-f="twd" type="number" inputmode="decimal" step="any" value="${esc(i.twd)}" placeholder="台"></td>
     <td class="o" data-l="日區價 (JPY)"><input data-f="jpy" type="number" inputmode="decimal" step="any" value="${esc(i.jpy)}" placeholder="日"></td>
@@ -188,9 +189,9 @@ function renderLocal(){
   if(!local.some(g=>String(g.id)===String(cur)))cur=local.length?String(local[0].id):'';
   put('cur',cur);
   $('sel').innerHTML=local.map((g,n)=>`<option value="${g.id}" ${String(g.id)===String(cur)?'selected':''}>${n+1}. ${esc(g.name)}</option>`).join('')||'<option>（尚無遊戲）</option>';
-  $('sel').disabled=!local.length;$('delgame').disabled=!local.length;
+  $('sel').disabled=!local.length;$('delgame').disabled=!local.length;$('rename').disabled=!local.length;
   const pos=local.findIndex(g=>String(g.id)===String(cur));
-  $('pos').textContent=pos>=0?'目前順位：第 '+(pos+1)+' / '+local.length+' 個':'';
+  $('pos').textContent=pos>=0?local[pos].name+'（第 '+(pos+1)+' / '+local.length+' 個）':'';
   $('up').disabled=pos<=0;$('down').disabled=pos<0||pos>=local.length-1;
   $('local').innerHTML=local.filter(g=>String(g.id)===String(cur)).map(g=>`<div class="card" data-g="${g.id}">
     <h2><span>${esc(g.name)}</span></h2>
@@ -201,8 +202,10 @@ function renderLocal(){
     ${g.items.map(rowHtml).join('')}</table></div>
     <div style="margin-top:8px"><button data-act="addrow">＋ 新增項目</button></div></div>`).join('')
     ||'<div class="sub">還沒有遊戲，先在上面新增一個。</div>';
-  recalc();
+  recalc();autosize();
 }
+function autosize(){document.querySelectorAll('#local textarea.nm').forEach(t=>{t.style.height='auto';t.style.height=t.scrollHeight+2+'px'})}
+window.addEventListener('resize',autosize);
 // 只更新計算結果，不重建輸入欄（避免輸入中失去焦點）
 function recalc(){
   document.querySelectorAll('#local .card[data-g]').forEach(card=>{
@@ -275,7 +278,9 @@ $('local').addEventListener('input',e=>{
   const i=g.items[+e.target.closest('tr').dataset.i];
   i[f]=f==='buy'?e.target.checked:e.target.value;
   saveLocal();recalc();
+  if(e.target.tagName==='TEXTAREA')autosize();
 });
+$('local').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.tagName==='TEXTAREA')e.preventDefault()});
 $('sel').onchange=()=>{cur=$('sel').value;renderLocal()};
 function move(d){
   const i=local.findIndex(x=>String(x.id)===String(cur)),j=i+d;
@@ -285,6 +290,12 @@ function move(d){
 }
 $('up').onclick=()=>move(-1);
 $('down').onclick=()=>move(1);
+$('rename').onclick=async()=>{
+  const g=local.find(x=>String(x.id)===String(cur));if(!g)return;
+  const name=await ask('重新命名遊戲分類',{input:true,placeholder:g.name,text:'目前名稱：'+g.name,ok:'改名'});
+  if(!name)return;
+  g.name=name;saveLocal();renderLocal();
+};
 $('delgame').onclick=async()=>{
   const g=local.find(x=>String(x.id)===String(cur));if(!g)return;
   const yes=await ask('刪除遊戲分類',{text:'確定刪除「'+g.name+'」和裡面所有項目？此動作無法復原。',ok:'刪除'});
